@@ -12,6 +12,86 @@ Cloaken operates as a reverse proxy that presents visitors with a CAPTCHA challe
 2. A Node.js-based CAPTCHA server
 3. A PHP server hosting the phishing kits.
 
+## Activity Flow
+
+The following diagram illustrates the complete activity flow of the Cloaken system:
+
+```mermaid
+flowchart TD
+    Start([Visitor Accesses URL]) --> ExtractSubdomain[Extract Subdomain from URL]
+    ExtractSubdomain --> ValidateID{Valid Honeypot ID?}
+    
+    ValidateID -->|No| NotFound[404 - Not Found]
+    NotFound --> End1([End])
+    
+    ValidateID -->|Yes| QueryDB[Query Honeypot from Database]
+    QueryDB --> HoneypotExists{Honeypot Exists?}
+    
+    HoneypotExists -->|No| NotFound
+    
+    HoneypotExists -->|Yes| MarkAccessed[Mark Honeypot as Accessed<br/>Create Visit Record]
+    MarkAccessed --> CheckCaptchaType{Check CAPTCHA Type}
+    
+    CheckCaptchaType -->|none| DirectProxy[Proxy to Phishing Kit]
+    DirectProxy --> ShowPhishing[Show Phishing Content]
+    ShowPhishing --> End2([End])
+    
+    CheckCaptchaType -->|recaptchav2<br/>hcaptcha<br/>slide<br/>rotate| RenderCaptcha[Render CAPTCHA Challenge Page]
+    RenderCaptcha --> VisitorSolves[Visitor Solves CAPTCHA]
+    VisitorSolves --> SubmitCaptcha[Submit CAPTCHA Response]
+    
+    SubmitCaptcha --> VerifyType{CAPTCHA Type}
+    
+    VerifyType -->|recaptchav2| VerifyRecaptcha[Verify with Google reCAPTCHA API]
+    VerifyType -->|hcaptcha| VerifyHcaptcha[Verify with hCaptcha API]
+    VerifyType -->|slide| VerifySlide[Verify with GeeTest API]
+    VerifyType -->|rotate| VerifyRotate[Decrypt Token & Check Angle]
+    
+    VerifyRecaptcha --> VerificationResult{Verification Successful?}
+    VerifyHcaptcha --> VerificationResult
+    VerifySlide --> VerificationResult
+    VerifyRotate --> VerificationResult
+    
+    VerificationResult -->|Yes| MarkSolved[Mark Honeypot as Solved]
+    MarkSolved --> ProxyToKit[Proxy Request to Phishing Kit]
+    ProxyToKit --> ShowPhishing
+    
+    VerificationResult -->|No| Redirect[Redirect to Decoy URL]
+    Redirect --> End3([End])
+    
+    style Start fill:#90EE90
+    style End1 fill:#FFB6C1
+    style End2 fill:#90EE90
+    style End3 fill:#FFB6C1
+    style ShowPhishing fill:#FFD700
+    style VerificationResult fill:#87CEEB
+    style CheckCaptchaType fill:#87CEEB
+```
+
+### Flow Description
+
+1. **Initial Request**: A visitor accesses a URL with a subdomain that serves as the honeypot ID
+2. **Validation**: The system extracts the subdomain and validates if it's a valid MongoDB ObjectId
+3. **Database Query**: If valid, queries the database for the corresponding honeypot entry
+4. **Access Tracking**: Marks the honeypot as accessed and creates a visit record for analytics
+5. **CAPTCHA Decision**: Based on the honeypot's `captchaType`:
+   - **none**: Directly proxies to the phishing kit (no CAPTCHA protection)
+   - **recaptchav2**: Shows Google reCAPTCHA v2 challenge
+   - **hcaptcha**: Shows hCaptcha challenge
+   - **slide**: Shows GeeTest slide CAPTCHA challenge
+   - **rotate**: Shows custom rotation CAPTCHA challenge
+6. **CAPTCHA Verification**: 
+   - For third-party CAPTCHAs (reCAPTCHA, hCaptcha, GeeTest), the system makes API calls to verify the response
+   - For the custom rotate CAPTCHA, the system decrypts the challenge token and validates the rotation angle
+7. **Success Path**: If verification succeeds, the system marks the honeypot as solved and proxies the request to the phishing kit
+8. **Failure Path**: If verification fails, the visitor is redirected to a random decoy URL from a predefined list
+
+### Additional Features
+
+- **Fingerprinting**: For visitors with JavaScript enabled, the system collects browser fingerprints via a beacon endpoint
+- **Resource Proxying**: All phishing kit resources (CSS, JS, images) are proxied through the Cloaken server to maintain cloaking
+- **Dashboard Management**: Administrators can create, manage, and export honeypot data through an authenticated dashboard
+
 ## Installation
 
 Cloaken is tested on UNIX systems running Docker. Follow these steps to deploy the system:
